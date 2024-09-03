@@ -95,6 +95,7 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
         ("/usr/lib32", "/usr/lib64"),
         ("/lib/i386-linux-gnu", "/lib/x86_64-linux-gnu"),
         ("/usr/lib/i386-linux-gnu", "/usr/lib/x86_64-linux-gnu"),
+        ("/usr/i686-pc-linux-gnu/lib", "/usr/x86_64-pc-linux-gnu/lib"),
     ]
 
     soundfont_folders = [
@@ -254,9 +255,12 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
     @property
     def runtime_architectures(self):
         """Return the architectures supported on this machine"""
+        x86 = "i386"
+        if self.is_exherbo():
+            x86 = "libc6"
         if self.arch == "x86_64":
-            return ["i386", "x86_64"]
-        return ["i386"]
+            return [x86, "x86_64"]
+        return [x86]
 
     @property
     def requirements(self):
@@ -334,13 +338,21 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
                     if lib_paths[1] not in exported_lib_folders:
                         yield lib_paths[1]
 
+    def is_exherbo(self):
+        return system.path_exists("/etc/exherbo-release")
+
     def get_ldconfig_libs(self):
         """Return a list of available libraries, as returned by `ldconfig -p`."""
         ldconfig = self.get("ldconfig")
         if not ldconfig:
             logger.error("Could not detect ldconfig on this system")
             return []
-        output = system.read_process_output([ldconfig, "-p"]).split("\n")
+
+        ld_cmd = [ldconfig, "-p"]
+        if self.is_exherbo():
+            ld_cmd = [ldconfig, "-C", "/etc/ld-i686-pc-linux-gnu.cache", "-p"]
+
+        output = system.read_process_output(ld_cmd).split("\n")
         return [line.strip("\t") for line in output if line.startswith("\t")]
 
     def get_shared_libraries(self):
@@ -367,6 +379,7 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
         for req in self.requirements:
             for lib in SYSTEM_COMPONENTS["LIBRARIES"][req]:
                 for shared_lib in self.shared_libraries[lib]:
+                    # logger.info(f"Shared lib to ({lib}) be added: {shared_lib} of this requirement: {req}")
                     self._cache["LIBRARIES"][shared_lib.arch][req].append(lib)
 
     def populate_sound_fonts(self):
@@ -431,7 +444,7 @@ class SharedLibrary:
     @property
     def arch(self):
         """Return the architecture for a shared library"""
-        detected_arch = ["x86-64", "x32"]
+        detected_arch = ["x86-64", "x32", "libc6"]
         for arch in detected_arch:
             if arch in self.flags:
                 return arch.replace("-", "_")
